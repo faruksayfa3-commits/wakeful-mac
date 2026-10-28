@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14        # Apple Silicon
+            arch: arm64
+          # macos-13 was the last Intel image with that name; GitHub retired it in Dec 2025.
+          # macos-15-intel is its x86_64 replacement.
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Host
+        run: |
+          uname -m
+          test "$(uname -m)" = "${{ matrix.arch }}"
+          sw_vers
+          swiftc --version
+
+      - name: Build universal app
+        run: ./build.sh
+
+      - name: Check both slices
+        run: |
+          archs=$(lipo -archs build/Vigil.app/Contents/MacOS/Vigil)
+          echo "archs: $archs"
+          for a in x86_64 arm64; do
+            [[ " $archs " == *" $a "* ]] || { echo "missing $a slice"; exit 1; }
+          done
+
+      - name: Check CLI syntax
+        run: zsh -n bin/vigil

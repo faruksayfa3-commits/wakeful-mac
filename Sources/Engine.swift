@@ -51,10 +51,16 @@ final class Engine {
     private var happyUntil = Date.distantPast
     private var timer: Timer?
     private var wifiBusy = false
+    private var restorePending = false   // we set disablesleep=1 and have not managed to set it back yet
 
     var awake: Bool { dryRun ? fakeAwake : sleepDisabledNow() }
 
     func start() {
+        Notifier.config = config
+        // A previous run killed mid-session left disablesleep=1 behind: that flag is ours, not "another tool's".
+        if !dryRun, let d = try? Data(contentsOf: Paths.state),
+           let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+           o["since"] != nil, o["dryRun"] as? Bool != true, sleepDisabledNow() { restorePending = true }
         timer = Timer.scheduledTimer(withTimeInterval: Engine.tickSeconds, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(timer!, forMode: .common)
         tick()
@@ -142,7 +148,7 @@ final class Engine {
         if config.keepWhileRemote, acOK || manualOn, let r = remoteSessionActive(procs) { why.append("remote:\(r)") }
 
         reasons = why
-        externalAwake = isAwake && session == nil
+        externalAwake = isAwake && session == nil && !restorePending
 
         // ---- guards ----
         var trip: String?
@@ -172,11 +178,14 @@ final class Engine {
         } else { warmSince = nil }
 
         if let trip {
+            let wasBlocked = (blockedUntil ?? .distantPast) > now
             if isAwake && owned { _ = setSleepDisabled(false) }
+            session?.trips.append(trip)   // before endSession, which clears `session`
             if owned { endSession(reason: "guard: \(trip)") }
-            session?.trips.append(trip)
-            Notifier.say("Vigil: going to sleep", trip, priority: 5, tags: "rotating_light")
-            Notifier.hooks("guard", reason: trip)
+            if owned || !wasBlocked {   // once per episode, not on every tick while the condition lasts
+                Notifier.say("Vigil: going to sleep", trip, priority: 5, tags: "rotating_light")
+                Notifier.hooks("guard", reason: trip)
+            }
             blockedUntil = now.addingTimeInterval(1800)
             manualOn = false; manualEnd = nil; manualWatch = nil
         }
@@ -192,6 +201,8 @@ final class Engine {
         } else if !want && session != nil {
             if nowAwake { _ = setSleepDisabled(false) }
             endSession(reason: why.isEmpty ? "nothing left to wait for" : "blocked")
+        } else if !want && restorePending {   // an earlier "back to normal sleep" failed: retry
+            if nowAwake { _ = setSleepDisabled(false) } else { restorePending = false }
         }
 
         // ---- while a session runs ----
@@ -298,7 +309,13 @@ final class Engine {
         if dryRun { fakeAwake = value; return true }
         let r = sh("/usr/bin/sudo", ["-n", "/usr/bin/pmset", "-a", "disablesleep", value ? "1" : "0"])
         if r.status != 0 { Notifier.local("Vigil can't change sleep settings", "Run install.sh again (sudoers rule missing).") }
+        restorePending = !value && r.status != 0
         return r.status == 0
+    }
+
+    /// On quit / SIGTERM: give disablesleep back if we hold it.
+    func shutdown() {
+        if session != nil || restorePending, awake { _ = setSleepDisabled(false) }
     }
 
     // MARK: state file (read by the `vigil` CLI)
