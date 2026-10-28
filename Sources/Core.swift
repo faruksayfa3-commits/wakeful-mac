@@ -6,7 +6,7 @@ import AppKit
 enum Paths {
     static let dir: URL = {
         let u = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Vigil")
+            .appendingPathComponent("Wakeful")
         try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
         return u
     }()
@@ -21,7 +21,7 @@ enum Paths {
     static let hooks = dir.appendingPathComponent("hooks")
 }
 
-let dryRun = ProcessInfo.processInfo.environment["VIGIL_DRYRUN"] == "1"
+let dryRun = ProcessInfo.processInfo.environment["WAKEFUL_DRYRUN"] == "1"
 
 // MARK: - shell
 
@@ -53,7 +53,7 @@ struct Schedule: Codable {
 struct Config: Codable {
     var theme = "eye"                         // eye | cat | robot
     var ntfyServer = "https://ntfy.sh"
-    var ntfyTopic = "vigil-" + String((0..<24).map { _ in "abcdefghijklmnopqrstuvwxyz0123456789".randomElement()! })
+    var ntfyTopic = "wakeful-" + String((0..<24).map { _ in "abcdefghijklmnopqrstuvwxyz0123456789".randomElement()! })
     var notifyPhone = true
     var phoneCommands = true                  // listen on <topic>-cmd for off/on/status
     var haWebhook = ""                        // Home Assistant (or any) webhook, called on state changes
@@ -77,8 +77,14 @@ struct Config: Codable {
     var schedules: [Schedule] = []
 
     static func load() -> Config {
-        if let d = try? Data(contentsOf: Paths.config), let c = try? JSONDecoder().decode(Config.self, from: d) { return c }
         let c = Config()
+        if let d = try? Data(contentsOf: Paths.config) {
+            // keys missing from an older / hand-edited file fall back to defaults instead of failing the whole decode
+            if let user = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
+               let base = (try? JSONEncoder().encode(c)).flatMap({ (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }),
+               let merged = try? JSONSerialization.data(withJSONObject: base.merging(user) { $1 }),
+               let cfg = try? JSONDecoder().decode(Config.self, from: merged) { return cfg }
+        }
         // only on first run: an unreadable file (typo, missing key) must not be silently replaced, phone topic and all
         if !FileManager.default.fileExists(atPath: Paths.config.path) { c.save() }
         return c
@@ -128,7 +134,7 @@ enum Notifier {
         URLSession.shared.dataTask(with: req).resume()
     }
 
-    /// Runs every executable in hooks/<event>.d with VIGIL_EVENT / VIGIL_REASON set.
+    /// Runs every executable in hooks/<event>.d with WAKEFUL_EVENT / WAKEFUL_REASON set.
     static func hooks(_ event: String, reason: String) {
         let dir = Paths.hooks.appendingPathComponent("\(event).d")
         guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return }
@@ -138,7 +144,7 @@ enum Notifier {
             DispatchQueue.global().async {
                 let p = Process()
                 p.executableURL = URL(fileURLWithPath: path)
-                p.environment = ProcessInfo.processInfo.environment.merging(["VIGIL_EVENT": event, "VIGIL_REASON": reason]) { $1 }
+                p.environment = ProcessInfo.processInfo.environment.merging(["WAKEFUL_EVENT": event, "WAKEFUL_REASON": reason]) { $1 }
                 try? p.run()
             }
         }

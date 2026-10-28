@@ -1,0 +1,34 @@
+#!/bin/zsh
+# wakeful — command line for the Wakeful menu-bar app
+#   wakeful on [2h|90m|1h30m]     stay awake (no argument = until stopped)
+#   wakeful until 07:00           stay awake until that time
+#   wakeful watch <name|pid>      stay awake until that process exits
+#   wakeful off                   let the Mac sleep
+#   wakeful status [--json]
+#   wakeful report                open the last night report / card
+STATE="$HOME/Library/Application Support/Wakeful/state.json"
+enc() { /usr/bin/python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$1"; }
+send() { open -g "wakeful://$1"; }
+case "$1" in
+  on)     [[ -n "$2" ]] && send "on?for=$2" || send "on" ;;
+  until)  send "on?until=$2" ;;
+  watch)  send "watch?name=$(enc "$2")" ;;
+  off)    send "off" ;;
+  report) send "report" ;;
+  status|"")
+    [[ -f "$STATE" ]] || { echo "Wakeful is not running"; exit 1 }
+    if [[ "$2" == "--json" ]]; then cat "$STATE"; else
+      /usr/bin/python3 - "$STATE" <<'PY'
+import json, sys
+s = json.load(open(sys.argv[1]))
+if s["awake"]:
+    m = s.get("awakeSeconds", 0) // 60
+    why = ", ".join(s["reasons"]) or ("another tool" if s.get("external") else "manual")
+    print(f"wakeful: AWAKE for {m//60}h {m%60}m — {why}")
+else:
+    print("wakeful: asleep (normal sleep)")
+print(f"       battery {s['battery']}%{' (AC)' if s['onAC'] else ''}" + (f" · {s['tempC']}°C" if 'tempC' in s else "") + (" · lid closed" if s["lidClosed"] else ""))
+PY
+    fi ;;
+  *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

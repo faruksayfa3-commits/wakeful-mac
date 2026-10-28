@@ -43,7 +43,7 @@ enum Card {
             for l in lines { text(l, top: y, size: 48, weight: .medium, alpha: 0.9); y -= 84 }
             text("night score \(score)/100", top: 400, size: 84, weight: .heavy, color: NSColor(red: 1, green: 0.85, blue: 0.4, alpha: 1))
             if streak > 1 { text("\(streak)-night streak", top: 285, size: 54, weight: .semibold, alpha: 0.85) }
-            text("Vigil — open-source, keeps your Mac awake", top: 140, size: 36, weight: .medium, alpha: 0.55)
+            text("Wakeful — open-source, keeps your Mac awake", top: 140, size: 36, weight: .medium, alpha: 0.55)
             return true
         }
         guard let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),

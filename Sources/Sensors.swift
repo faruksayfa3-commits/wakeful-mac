@@ -57,10 +57,10 @@ final class SMC {
 
     private init() {
         let svc = IOServiceGetMatchingService(kIOMainPortCompat, IOServiceMatching("AppleSMC"))
-        if ProcessInfo.processInfo.environment["VIGIL_DEBUG"] != nil { print("smc svc", svc, "size", MemoryLayout<KeyData>.size) }
+        if ProcessInfo.processInfo.environment["WAKEFUL_DEBUG"] != nil { print("smc svc", svc, "size", MemoryLayout<KeyData>.size) }
         guard svc != 0, MemoryLayout<KeyData>.size == 80 else { return }
         let r = IOServiceOpen(svc, mach_task_self_, 0, &conn)
-        if ProcessInfo.processInfo.environment["VIGIL_DEBUG"] != nil { print("open", r) }
+        if ProcessInfo.processInfo.environment["WAKEFUL_DEBUG"] != nil { print("open", r) }
         IOObjectRelease(svc)
     }
 

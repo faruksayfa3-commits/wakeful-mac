@@ -1,14 +1,14 @@
-# Vigil 👁️ — keep your Mac awake only while it matters
+# Wakeful 👁️ — keep your Mac awake only while it matters
 
 **Close the lid. Your AI agent keeps working. The moment it's done, the Mac goes to sleep.**
 
-Vigil is a tiny open-source menu-bar app (Swift, universal Intel + Apple Silicon, macOS 12+) for people who leave
+Wakeful is a tiny open-source menu-bar app (Swift, universal Intel + Apple Silicon, macOS 12+) for people who leave
 Claude Code, Codex, aider, builds, `rsync` or backups running overnight — and don't want a Mac that either
 falls asleep at 3 a.m. and kills the job, or stays awake forever and cooks itself in a backpack.
 
 ## Why not Amphetamine / Caffeine / KeepingYouAwake?
 
-| | Amphetamine | KeepingYouAwake | Caffeine | **Vigil** |
+| | Amphetamine | KeepingYouAwake | Caffeine | **Wakeful** |
 |---|:-:|:-:|:-:|:-:|
 | Keep awake for a time | ✅ | ✅ | ✅ | ✅ |
 | Lid closed, no external display | needs a helper script | ❌ | ❌ | ✅ |
@@ -32,42 +32,42 @@ falls asleep at 3 a.m. and kills the job, or stays awake forever and cooks itsel
 - **Night report + card.** Hours awake, battery used, peak temperature, what finished, score and streak — as Markdown and a 1080×1920 PNG you can post.
 - **Moods.** The menu-bar icon (eye / cat / robot) sleeps, wakes, gets tired, sweats when hot and smiles when done.
 - **Fan check.** Hot at low CPU for 5+ minutes → "dust or a blocked vent?".
-- **Hackable.** `vigil` CLI, `vigil://` URL scheme (Shortcuts: *Open URL*), `hooks/{on,off,finished,guard}.d/` scripts, webhook for Home Assistant.
+- **Hackable.** `wakeful` CLI, `wakeful://` URL scheme (Shortcuts: *Open URL*), `hooks/{on,off,finished,guard}.d/` scripts, webhook for Home Assistant.
 
 ## Install
 
 ```sh
-git clone https://github.com/faruksayfa3-commits/vigil-mac.git && cd vigil-mac
+git clone https://github.com/faruksayfa3-commits/wakeful-mac.git && cd wakeful-mac
 ./install.sh
 ```
 
-`install.sh` builds the app, copies it to `/Applications`, adds `~/.local/bin/vigil`, a login item, and asks for your password **once** to create `/etc/sudoers.d/vigil` — a rule that allows exactly four commands and nothing else:
+`install.sh` builds the app, copies it to `/Applications`, adds `~/.local/bin/wakeful`, a login item, and asks for your password **once** to create `/etc/sudoers.d/wakeful` — a rule that allows exactly four commands and nothing else:
 `pmset -a disablesleep 0|1` and `pmset -a lowpowermode 0|1`. Read it before you run it; it's ~40 lines.
 
 ## Use
 
 ```sh
-vigil on 2h          # stay awake two hours (lid closed too)
-vigil until 07:00
-vigil watch rsync    # until the process exits
-vigil status --json
-vigil off
+wakeful on 2h          # stay awake two hours (lid closed too)
+wakeful until 07:00
+wakeful watch rsync    # until the process exits
+wakeful status --json
+wakeful off
 ```
 
-Or click the eye. Settings live in `~/Library/Application Support/Vigil/config.json`.
+Or click the eye. Settings live in `~/Library/Application Support/Wakeful/config.json`.
 In the ntfy app, subscribe to the topic from the menu (**Copy phone topic**) — keep it secret, it is the only "password".
 
 ## Honest limits
 
 - Tested on an Intel MacBook Pro (2017) with macOS 15. The Apple Silicon slice builds but has **not been run on real hardware yet** — reports welcome.
 - "Working" is a heuristic (CPU and child processes). An agent waiting only on the network can look idle; raise `activityGraceMin` if that bites.
-- Temperatures come from SMC keys (Intel and common Apple Silicon keys); if none exist, Vigil falls back to macOS thermal pressure.
+- Temperatures come from SMC keys (Intel and common Apple Silicon keys); if none exist, Wakeful falls back to macOS thermal pressure.
 - Locking the screen uses a private macOS call (`SACLockScreenImmediate`); it may break in a future macOS.
 - Not notarized: build it yourself (that is what `install.sh` does).
 
 ## Română, pe scurt
 
-Vigil ține MacBook-ul treaz (și cu capacul închis) **doar cât timp rulează ceva important** — un agent AI, un build, un backup — și îl lasă să adoarmă imediat ce termină. Te protejează de supraîncălzire și baterie goală, îți trimite notificări pe telefon și îți face dimineața un raport cu ce a lucrat peste noapte. Open-source, MIT.
+Wakeful ține MacBook-ul treaz (și cu capacul închis) **doar cât timp rulează ceva important** — un agent AI, un build, un backup — și îl lasă să adoarmă imediat ce termină. Te protejează de supraîncălzire și baterie goală, îți trimite notificări pe telefon și îți face dimineața un raport cu ce a lucrat peste noapte. Open-source, MIT.
 
 ## License
 

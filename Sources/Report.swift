@@ -46,7 +46,7 @@ enum Report {
         }
         st.save()
 
-        var md = "# Vigil — night report\n\n"
+        var md = "# Wakeful — night report\n\n"
         md += "- Awake: **\(fmtDuration(dur))** (\(time(s.start)) → \(time(end)))\n"
         md += "- Why: \(s.reasons.sorted().joined(separator: ", "))\n"
         md += "- Battery: \(s.startPercent)% → \(endPercent)% (used \(used)%)\n"

@@ -136,7 +136,7 @@ final class Engine {
                     if idle > Double(config.stuckMin) * 60, !stuckNotified.contains(name), session != nil {
                         stuckNotified.insert(name)
                         session?.stuck.append(name)
-                        Notifier.say("Vigil: \(name) looks stuck", "\(name) is alive but has done nothing for \(config.stuckMin) minutes.", priority: 4, tags: "warning")
+                        Notifier.say("Wakeful: \(name) looks stuck", "\(name) is alive but has done nothing for \(config.stuckMin) minutes.", priority: 4, tags: "warning")
                     }
                     if busy { stuckNotified.remove(name) }
                 }
@@ -166,14 +166,14 @@ final class Engine {
 
         if let t = (tempC ?? 0) >= config.tempWarnC ? tempC : nil, trip == nil, now.timeIntervalSince(lastWarn) > 600, owned {
             lastWarn = now
-            Notifier.say("Vigil: Mac is hot", "\(Int(t))°C — I'll put it to sleep at \(Int(config.tempLimitC))°C.", priority: 4, tags: "fire")
+            Notifier.say("Wakeful: Mac is hot", "\(Int(t))°C — I'll put it to sleep at \(Int(config.tempLimitC))°C.", priority: 4, tags: "fire")
         }
         // hot while barely working → fan blocked / dust
         if let t = tempC, t >= config.tempWarnC - 5, cpu < 30 {
             warmSince = warmSince ?? now
             if now.timeIntervalSince(warmSince!) > 300, now.timeIntervalSince(lastDust) > 6 * 3600 {
                 lastDust = now
-                Notifier.say("Vigil: check the fan", "\(Int(t))°C at only \(Int(cpu))% CPU for 5+ minutes — dust or a blocked vent is likely.", priority: 3, tags: "wind_face")
+                Notifier.say("Wakeful: check the fan", "\(Int(t))°C at only \(Int(cpu))% CPU for 5+ minutes — dust or a blocked vent is likely.", priority: 3, tags: "wind_face")
             }
         } else { warmSince = nil }
 
@@ -183,7 +183,7 @@ final class Engine {
             session?.trips.append(trip)   // before endSession, which clears `session`
             if owned { endSession(reason: "guard: \(trip)") }
             if owned || !wasBlocked {   // once per episode, not on every tick while the condition lasts
-                Notifier.say("Vigil: going to sleep", trip, priority: 5, tags: "rotating_light")
+                Notifier.say("Wakeful: going to sleep", trip, priority: 5, tags: "rotating_light")
                 Notifier.hooks("guard", reason: trip)
             }
             blockedUntil = now.addingTimeInterval(1800)
@@ -257,7 +257,7 @@ final class Engine {
         session = s
         stuckNotified = []
         let desc = reasons.joined(separator: ", ")
-        Notifier.phone("Vigil is awake", "Staying awake: \(desc)", priority: 2, tags: "eyes")
+        Notifier.phone("Wakeful is awake", "Staying awake: \(desc)", priority: 2, tags: "eyes")
         Notifier.hooks("on", reason: desc)
         Notifier.webhook(["state": "on", "reasons": reasons, "battery": power.percent])
     }
@@ -267,7 +267,7 @@ final class Engine {
         session = nil
         setLowPower(false)
         let report = Report.build(s, end: Date(), endPercent: power.percent, reason: reason)
-        Notifier.say("Vigil is done", report.summary, priority: 3, tags: "sleeping")
+        Notifier.say("Wakeful is done", report.summary, priority: 3, tags: "sleeping")
         Notifier.hooks("off", reason: reason)
         Notifier.webhook(["state": "off", "reason": reason, "battery": power.percent])
         if s.trips.isEmpty { happyUntil = Date().addingTimeInterval(120) }
@@ -275,7 +275,7 @@ final class Engine {
 
     private func finishedTask(_ name: String) {
         session?.finished.append(name)
-        Notifier.say("Vigil: \(name) finished", "\(name) is done" + (session.map { " after \(fmtDuration(Date().timeIntervalSince($0.start))) awake" } ?? "") + ".", priority: 3, tags: "white_check_mark")
+        Notifier.say("Wakeful: \(name) finished", "\(name) is done" + (session.map { " after \(fmtDuration(Date().timeIntervalSince($0.start))) awake" } ?? "") + ".", priority: 3, tags: "white_check_mark")
         Notifier.hooks("finished", reason: name)
     }
 
@@ -308,7 +308,7 @@ final class Engine {
     func setSleepDisabled(_ value: Bool) -> Bool {
         if dryRun { fakeAwake = value; return true }
         let r = sh("/usr/bin/sudo", ["-n", "/usr/bin/pmset", "-a", "disablesleep", value ? "1" : "0"])
-        if r.status != 0 { Notifier.local("Vigil can't change sleep settings", "Run install.sh again (sudoers rule missing).") }
+        if r.status != 0 { Notifier.local("Wakeful can't change sleep settings", "Run install.sh again (sudoers rule missing).") }
         restorePending = !value && r.status != 0
         return r.status == 0
     }
@@ -318,7 +318,7 @@ final class Engine {
         if session != nil || restorePending, awake { _ = setSleepDisabled(false) }
     }
 
-    // MARK: state file (read by the `vigil` CLI)
+    // MARK: state file (read by the `wakeful` CLI)
 
     private func writeState() {
         var d: [String: Any] = [

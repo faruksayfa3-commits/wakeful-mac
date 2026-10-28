@@ -1,6 +1,6 @@
 import AppKit
 
-// Vigil — keeps your Mac awake (lid closed too) while something that matters is still running.
+// Wakeful — keeps your Mac awake (lid closed too) while something that matters is still running.
 
 final class PhoneCommands {
     private var proc: Process?
@@ -61,7 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         NSAppleEventManager.shared().setEventHandler(self, andSelector: #selector(handleURL(_:reply:)),
                                                      forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL))
-        item.autosaveName = "vigil"
+        item.autosaveName = "wakeful"
         menu.delegate = self
         menu.autoenablesItems = false   // so the isEnabled values set in menuNeedsUpdate (e.g. "Stop") take effect
         item.menu = menu
@@ -80,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         item.button?.performClick(nil); return false
     }
 
-    // MARK: URL scheme  vigil://on?for=2h  |  on?until=07:00  |  off  |  watch?name=rsync  |  report
+    // MARK: URL scheme  wakeful://on?for=2h  |  on?until=07:00  |  off  |  watch?name=rsync  |  report
 
     @objc private func handleURL(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
         guard let s = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue, let u = URLComponents(string: s) else { return }
@@ -102,15 +102,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch parts.first ?? "" {
         case "off", "sleep", "panic":
             engine.stopManual()
-            Notifier.phone("Vigil", "Stopping. Mac will sleep normally.", tags: "zzz")
+            Notifier.phone("Wakeful", "Stopping. Mac will sleep normally.", tags: "zzz")
         case "on":
             let d = parts.count > 1 ? parseDuration(parts[1]) : 4 * 3600
             engine.startManual(duration: min(d ?? 4 * 3600, 12 * 3600))
-            Notifier.phone("Vigil", "Awake for \(fmtDuration(min(d ?? 4 * 3600, 12 * 3600))).", tags: "eyes")
+            Notifier.phone("Wakeful", "Awake for \(fmtDuration(min(d ?? 4 * 3600, 12 * 3600))).", tags: "eyes")
         case "status":
-            Notifier.phone("Vigil status", engine.statusLine() + " · battery \(engine.power.percent)%" + (engine.tempC.map { " · \(Int($0))°C" } ?? ""))
+            Notifier.phone("Wakeful status", engine.statusLine() + " · battery \(engine.power.percent)%" + (engine.tempC.map { " · \(Int($0))°C" } ?? ""))
         default:
-            Notifier.phone("Vigil", "Commands: off · on [2h] · status", tags: "information_source")
+            Notifier.phone("Wakeful", "Commands: off · on [2h] · status", tags: "information_source")
         }
     }
 
@@ -200,7 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add("Send test notification", #selector(testNotify))
         add("Open settings file", #selector(openConfig))
         menu.addItem(.separator())
-        add("Quit Vigil", #selector(quit), key: "q")
+        add("Quit Wakeful", #selector(quit), key: "q")
     }
 
     @discardableResult
@@ -251,14 +251,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let files = (try? FileManager.default.contentsOfDirectory(at: Paths.reports, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
         if let png = files.filter({ $0.pathExtension == "png" }).max(by: { $0.path < $1.path }) { NSWorkspace.shared.open(png) }
         else if let md = files.filter({ $0.pathExtension == "md" }).max(by: { $0.path < $1.path }) { NSWorkspace.shared.open(md) }
-        else { Notifier.local("Vigil", "No report yet — it appears after the first awake session.") }
+        else { Notifier.local("Wakeful", "No report yet — it appears after the first awake session.") }
     }
     @objc private func copyTopic() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(engine.config.ntfyTopic, forType: .string)
-        Notifier.local("Vigil", "Topic copied. In the ntfy app subscribe to it (and to \(engine.config.ntfyTopic)-cmd to send commands).")
+        Notifier.local("Wakeful", "Topic copied. In the ntfy app subscribe to it (and to \(engine.config.ntfyTopic)-cmd to send commands).")
     }
-    @objc private func testNotify() { Notifier.say("Vigil test", "If you see this on your phone, notifications work.") }
+    @objc private func testNotify() { Notifier.say("Wakeful test", "If you see this on your phone, notifications work.") }
     @objc private func openConfig() { NSWorkspace.shared.open(Paths.config) }
     @objc private func quit() { NSApp.terminate(nil) }   // applicationWillTerminate restores sleep
 }

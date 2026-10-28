@@ -16,7 +16,7 @@ func themedIcon(theme: String, mood: Mood, t: CGFloat, size: CGFloat = 18) -> NS
         return true
     }
     img.isTemplate = true
-    img.accessibilityDescription = "Vigil"
+    img.accessibilityDescription = "Wakeful"
     return img
 }
 

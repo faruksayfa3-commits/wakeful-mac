@@ -36,11 +36,11 @@ jobs:
 
       - name: Check both slices
         run: |
-          archs=$(lipo -archs build/Vigil.app/Contents/MacOS/Vigil)
+          archs=$(lipo -archs build/Wakeful.app/Contents/MacOS/Wakeful)
           echo "archs: $archs"
           for a in x86_64 arm64; do
             [[ " $archs " == *" $a "* ]] || { echo "missing $a slice"; exit 1; }
           done
 
       - name: Check CLI syntax
-        run: zsh -n bin/vigil
+        run: zsh -n bin/wakeful
