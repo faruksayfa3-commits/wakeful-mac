@@ -79,7 +79,8 @@ struct Config: Codable {
     static func load() -> Config {
         if let d = try? Data(contentsOf: Paths.config), let c = try? JSONDecoder().decode(Config.self, from: d) { return c }
         let c = Config()
-        c.save()
+        // only on first run: an unreadable file (typo, missing key) must not be silently replaced, phone topic and all
+        if !FileManager.default.fileExists(atPath: Paths.config.path) { c.save() }
         return c
     }
     func save() {

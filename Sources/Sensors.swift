@@ -93,7 +93,11 @@ final class SMC {
 
     /// Hottest CPU/GPU/SoC temperature found. Intel keys first, then Apple Silicon ones.
     func temperature() -> Double? {
-        let keys = ["TC0P", "TC0E", "TC0F", "TC0D", "TCXC", "Tp01", "Tp05", "Tp09", "Tp0D", "Tp0H", "Tp0L", "Tg05", "Tg0D"]
+        let keys = ["TC0P", "TC0E", "TC0F", "TC0D", "TCXC",                                   // Intel
+                    "Tp01", "Tp05", "Tp09", "Tp0D", "Tp0H", "Tp0L", "Tg05", "Tg0D",           // M1
+                    "Tp0f", "Tp0j", "Tg0f", "Tg0j",                                           // M2
+                    "Te05", "Te0L", "Tf04", "Tf09", "Tf0A", "Tf0B", "Tf0D", "Tf0E", "Tf14", "Tf18",  // M3
+                    "Te09", "Tp0V", "Tp0Y", "Tp0e", "Tg0G", "Tg0H"]                           // M4
         let v = keys.compactMap { read($0) }.filter { $0 > 5 && $0 < 130 }
         return v.max()
     }
@@ -117,8 +121,10 @@ func listProcesses() -> [Proc] {
     var res: [Proc] = []
     for line in out.split(separator: "\n") {
         let f = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
-        guard f.count == 4, let pid = Int32(f[0]), let ppid = Int32(f[1]), let cpu = Double(f[2]) else { continue }
-        res.append(Proc(pid: pid, ppid: ppid, cpu: cpu, path: String(f[3])))
+        // ps prints %cpu with the locale's decimal separator ("0,5" under ro_RO / de_DE when run from a shell)
+        guard f.count == 4, let pid = Int32(f[0]), let ppid = Int32(f[1]),
+              let cpu = Double(f[2].replacingOccurrences(of: ",", with: ".")) else { continue }
+        res.append(Proc(pid: pid, ppid: ppid, cpu: cpu, path: f[3].trimmingCharacters(in: .whitespaces)))
     }
     return res
 }

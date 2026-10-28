@@ -10,14 +10,18 @@ final class PhoneCommands {
     func start() {
         guard Notifier.config.phoneCommands else { return }
         let c = Notifier.config
+        buffer = Data()
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
-        p.arguments = ["-sN", "--max-time", "86400", "\(c.ntfyServer)/\(c.ntfyTopic)-cmd/json"]
+        // ntfy sends a keepalive every ~45 s; no bytes for 120 s means a dead connection (sleep, Wi-Fi change) → reconnect
+        p.arguments = ["-sN", "--max-time", "86400", "--speed-limit", "1", "--speed-time", "120", "\(c.ntfyServer)/\(c.ntfyTopic)-cmd/json"]
         let pipe = Pipe()
         p.standardOutput = pipe
         pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
+            let chunk = h.availableData
+            if chunk.isEmpty { h.readabilityHandler = nil; return }   // EOF: otherwise the handler keeps firing
             guard let self else { return }
-            self.buffer.append(h.availableData)
+            self.buffer.append(chunk)
             while let nl = self.buffer.firstIndex(of: 10) {
                 let line = self.buffer.subdata(in: 0..<nl)
                 self.buffer.removeSubrange(0...nl)
@@ -59,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                                      forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL))
         item.autosaveName = "vigil"
         menu.delegate = self
+        menu.autoenablesItems = false   // so the isEnabled values set in menuNeedsUpdate (e.g. "Stop") take effect
         item.menu = menu
         engine.onChange = { [weak self] in self?.refreshIcon() }
         engine.start()
@@ -69,6 +74,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func didWake() { engine.tick() }
 
+    func applicationWillTerminate(_ notification: Notification) { engine.shutdown() }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         item.button?.performClick(nil); return false
     }
@@ -77,7 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func handleURL(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
         guard let s = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue, let u = URLComponents(string: s) else { return }
-        let q = Dictionary(uniqueKeysWithValues: (u.queryItems ?? []).compactMap { i in i.value.map { (i.name, $0) } })
+        let q = Dictionary((u.queryItems ?? []).compactMap { i in i.value.map { (i.name, $0) } }, uniquingKeysWith: { a, _ in a })
         switch u.host ?? "" {
         case "on":
             if let f = q["for"], let d = parseDuration(f) { engine.startManual(duration: d) }
@@ -253,14 +260,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc private func testNotify() { Notifier.say("Vigil test", "If you see this on your phone, notifications work.") }
     @objc private func openConfig() { NSWorkspace.shared.open(Paths.config) }
-    @objc private func quit() {
-        if engine.session != nil, engine.awake { _ = engine.setSleepDisabled(false) }
-        NSApp.terminate(nil)
-    }
+    @objc private func quit() { NSApp.terminate(nil) }   // applicationWillTerminate restores sleep
 }
 
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
+// pkill / launchctl bootout / logout send SIGTERM: quit through AppKit so disablesleep is given back.
+signal(SIGTERM, SIG_IGN)
+let sigterm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+sigterm.setEventHandler { NSApp.terminate(nil) }
+sigterm.resume()
 app.setActivationPolicy(.accessory)
 app.run()
