@@ -3,39 +3,67 @@ import AppKit
 // Wakeful — keeps your Mac awake (lid closed too) while something that matters is still running.
 
 final class PhoneCommands {
+    static let staleAfter: TimeInterval = 600
+    private final class LineBuffer { var data = Data() }   // one per connection, only touched on its pipe's handler queue
     private var proc: Process?
-    private var buffer = Data()
+    private var generation = 0          // bumped on restart: the old connection's callbacks and reconnect then do nothing
+    private var lastID: String?         // last command seen; a reconnect asks ntfy for everything after it
+    private var connectedAt: Int?       // unix time of the first connection, the `since` to use until a command arrives
     var handler: ((String) -> Void)?
 
     func start() {
         guard Notifier.config.phoneCommands else { return }
         let c = Notifier.config
-        buffer = Data()
+        generation += 1
+        let gen = generation
+        // Commands sent while we were reconnecting (the 30 s gap, sleep, a Wi-Fi change) are still in ntfy's cache:
+        // ask for everything after the last one we saw, or since we first connected, instead of only new ones.
+        var url = "\(c.ntfyServer)/\(c.ntfyTopic)-cmd/json"
+        if let id = lastID { url += "?since=\(id)" }
+        else if let t = connectedAt { url += "?since=\(t)" }
+        else { connectedAt = Int(Date().timeIntervalSince1970) }
+        let buffer = LineBuffer()
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
         // ntfy sends a keepalive every ~45 s; no bytes for 120 s means a dead connection (sleep, Wi-Fi change) → reconnect
-        p.arguments = ["-sN", "--max-time", "86400", "--speed-limit", "1", "--speed-time", "120", "\(c.ntfyServer)/\(c.ntfyTopic)-cmd/json"]
+        p.arguments = ["-sN", "--max-time", "86400", "--speed-limit", "1", "--speed-time", "120", url]
         let pipe = Pipe()
         p.standardOutput = pipe
         pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
             let chunk = h.availableData
             if chunk.isEmpty { h.readabilityHandler = nil; return }   // EOF: otherwise the handler keeps firing
-            guard let self else { return }
-            self.buffer.append(chunk)
-            while let nl = self.buffer.firstIndex(of: 10) {
-                let line = self.buffer.subdata(in: 0..<nl)
-                self.buffer.removeSubrange(0...nl)
-                if let o = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
-                   o["event"] as? String == "message", let m = o["message"] as? String {
-                    DispatchQueue.main.async { self.handler?(m.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) }
+            buffer.data.append(chunk)
+            while let nl = buffer.data.firstIndex(of: 10) {
+                let line = buffer.data.subdata(in: 0..<nl)
+                buffer.data.removeSubrange(0...nl)
+                guard let o = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                      o["event"] as? String == "message", let m = o["message"] as? String else { continue }
+                let id = o["id"] as? String, time = o["time"] as? Double
+                DispatchQueue.main.async {
+                    guard let self, gen == self.generation else { return }
+                    if let id { self.lastID = id }
+                    // a replayed command from long ago (the Mac slept through it) is stale, not an order
+                    if let time, Date().timeIntervalSince1970 - time > PhoneCommands.staleAfter { return }
+                    self.handler?(m.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
                 }
             }
         }
         p.terminationHandler = { [weak self] _ in
-            DispatchQueue.main.asyncAfter(deadline: .now() + 30) { self?.start() }   // reconnect
+            DispatchQueue.main.asyncAfter(deadline: .now() + 30) {   // reconnect
+                guard let self, gen == self.generation else { return }
+                self.start()
+            }
         }
         try? p.run()
         proc = p
+    }
+
+    /// Server, topic or the on/off switch changed: drop the connection and start over on the new topic.
+    func restart() {
+        generation += 1
+        proc?.terminate(); proc = nil
+        lastID = nil; connectedAt = nil
+        start()
     }
 }
 
@@ -48,6 +76,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var eyeStart = Date()
     private var eyeTimer: Timer?
     private var lastMood: Mood?, lastTheme = ""
+    private var settings: SettingsWindow?
+    private var health: HealthWindow?
 
     private let durations: [(String, TimeInterval)] = [
         ("30 minutes", 1800), ("1 hour", 3600), ("2 hours", 7200), ("4 hours", 14400),
@@ -70,6 +100,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         phone.handler = { [weak self] cmd in self?.phoneCommand(cmd) }
         phone.start()
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
+        installEditMenu()
+        // first launch (1.0 users see it once too): what works, the phone topic, and the fix for anything missing
+        if !UserDefaults.standard.bool(forKey: "onboarded") {
+            UserDefaults.standard.set(true, forKey: "onboarded")
+            showHealth(firstRun: true)
+        }
+    }
+
+    /// An accessory app shows no menu bar, but key equivalents still go through mainMenu:
+    /// without one, ⌘C / ⌘V / ⌘A / ⌘W do nothing in the Settings and Health windows.
+    private func installEditMenu() {
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        edit.addItem(.separator())
+        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        edit.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        let main = NSMenu(), editItem = NSMenuItem()
+        editItem.submenu = edit
+        main.addItem(editItem)
+        NSApp.mainMenu = main
+    }
+
+    /// Every config change (menu, Settings window) goes through here: save, hand it to the engine,
+    /// restart what depends on it.
+    private func apply(_ c: Config, fromSettings: Bool = false) {
+        let old = engine.config
+        engine.config = c
+        c.save()
+        if c.phoneCommands != old.phoneCommands || c.ntfyServer != old.ntfyServer || c.ntfyTopic != old.ntfyTopic { phone.restart() }
+        if !fromSettings { settings?.reload(c) }
+        refreshIcon()
+        engine.tick()
     }
 
     @objc private func didWake() { engine.tick() }
@@ -198,6 +264,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add("Last night's report", #selector(openLastReport))
         add("Copy phone topic (ntfy)", #selector(copyTopic))
         add("Send test notification", #selector(testNotify))
+        menu.addItem(.separator())
+        add("Settings…", #selector(openSettings), key: ",")
+        add("Health check…", #selector(openHealth))
+        let login = LaunchAtLogin.state
+        let li = add(login == .needsApproval ? "Launch at login (approve in System Settings)" : "Launch at login", #selector(toggleLogin))
+        li.state = login == .on ? .on : login == .needsApproval ? .mixed : .off
+        add("Check for updates…", #selector(checkUpdates))
         add("Open settings file", #selector(openConfig))
         menu.addItem(.separator())
         add("Quit Wakeful", #selector(quit), key: "q")
@@ -224,9 +297,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func flip(_ s: NSMenuItem) {
         guard let box = s.representedObject as? KeyPathBox else { return }
-        engine.config[keyPath: box.kp].toggle()
-        engine.config.save()
-        engine.tick()
+        var c = engine.config
+        c[keyPath: box.kp].toggle()
+        apply(c)
     }
 
     @objc private func startFor(_ s: NSMenuItem) { engine.startManual(duration: s.tag >= 0 ? durations[s.tag].1 : nil) }
@@ -235,7 +308,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc private func stopNow() { engine.stopManual() }
     @objc private func setTheme(_ s: NSMenuItem) {
-        engine.config.theme = (s.representedObject as? String) ?? "eye"; engine.config.save(); refreshIcon()
+        var c = engine.config
+        c.theme = (s.representedObject as? String) ?? "eye"
+        apply(c)
+    }
+
+    @objc private func openSettings() {
+        if settings == nil { settings = SettingsWindow(config: engine.config) { [weak self] c in self?.apply(c, fromSettings: true) } }
+        settings?.show(engine.config)
+    }
+    @objc private func openHealth() { showHealth(firstRun: false) }
+    private func showHealth(firstRun: Bool) {
+        health?.close()
+        health = HealthWindow(firstRun: firstRun, topic: { [weak self] in self?.engine.config.ntfyTopic ?? "" },
+                              openSettings: { [weak self] in self?.openSettings() })
+        health?.show()
+    }
+    @objc private func toggleLogin() {
+        let err: String?
+        switch LaunchAtLogin.state {
+        case .needsApproval: LaunchAtLogin.openSystemSettings(); return
+        case .on: err = LaunchAtLogin.set(false)
+        case .off: err = LaunchAtLogin.set(true)
+        }
+        if let err { alert("Launch at login", err) }
+    }
+    @objc private func checkUpdates() {
+        Updates.check { [weak self] r in
+            switch r {
+            case let .newer(v, page):
+                NSApp.activate(ignoringOtherApps: true)
+                let a = NSAlert()
+                a.messageText = "Wakeful \(v) is available"
+                a.informativeText = "You have \(appVersion). The release page has the download and what changed."
+                a.addButton(withTitle: "Open Release Page"); a.addButton(withTitle: "Later")
+                if a.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(page) }
+            case let .upToDate(v): self?.alert("Wakeful is up to date", "You have \(appVersion); the latest release is \(v).")
+            case .noRelease: self?.alert("No releases yet", "Nothing has been published on GitHub so far.")
+            case let .failed(why): self?.alert("Couldn't check for updates", why)
+            }
+        }
+    }
+    private func alert(_ title: String, _ text: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        let a = NSAlert()
+        a.messageText = title
+        a.informativeText = text
+        a.runModal()
     }
     @objc private func askWatch() {
         NSApp.activate(ignoringOtherApps: true)
@@ -262,6 +381,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func openConfig() { NSWorkspace.shared.open(Paths.config) }
     @objc private func quit() { NSApp.terminate(nil) }   // applicationWillTerminate restores sleep
 }
+
+// `wakeful doctor` runs this binary with --doctor: print the health check and exit, no menu-bar app.
+if CommandLine.arguments.dropFirst().first == "--doctor" { exit(Health.doctor()) }
 
 let app = NSApplication.shared
 let delegate = AppDelegate()

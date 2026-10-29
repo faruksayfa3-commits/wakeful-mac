@@ -19,6 +19,7 @@ struct SessionLog {
 
 final class Engine {
     static let tickSeconds: TimeInterval = 10
+    static let remoteHoldOff: TimeInterval = 60
 
     var config = Config.load() { didSet { Notifier.config = config } }
     var onChange: (() -> Void)?
@@ -33,6 +34,8 @@ final class Engine {
     // automatic state
     private var blockedUntil: Date?
     private var lastActivity: [String: Date] = [:]
+    private var lastBusy: [String: Date] = [:]   // last tick a watched process used CPU, agents and tasks alike (stuck detector)
+    private var remoteSeen: (kind: String, at: Date)?
     private var present: [String: Bool] = [:]
     private var stuckNotified = Set<String>()
     private var lastWarn = Date.distantPast
@@ -52,6 +55,7 @@ final class Engine {
     private var timer: Timer?
     private var wifiBusy = false
     private var restorePending = false   // we set disablesleep=1 and have not managed to set it back yet
+    private var sleepFailNotified = false   // one "can't change sleep settings" per episode, not one per tick
 
     var awake: Bool { dryRun ? fakeAwake : sleepDisabledNow() }
 
@@ -97,6 +101,11 @@ final class Engine {
         let thermal = ProcessInfo.processInfo.thermalState.rawValue
         let isAwake = awake
         let cpu = totalCPUPercent(procs)
+        // remote detection is a CPU heuristic that flickers around its thresholds: a session only counts as
+        // ended after 60 s without a sighting, otherwise it starts and stops an awake session every tick
+        if let r = remoteSessionActive(procs) { remoteSeen = (r, now) }
+        else if let r = remoteSeen, now.timeIntervalSince(r.at) >= Engine.remoteHoldOff { remoteSeen = nil }
+        let remote = remoteSeen?.kind
 
         // ---- reasons to stay awake ----
         var why: [String] = []
@@ -128,12 +137,15 @@ final class Engine {
                     let busy = family.reduce(0) { $0 + $1.cpu } > (isAgent ? 2.0 : 0.5)
                     if busy || !isAgent { lastActivity[name] = now }
                     else if lastActivity[name] == nil { lastActivity[name] = now }
+                    // tasks keep the Mac awake while they exist, so "stuck" is measured on CPU, not on lastActivity
+                    if busy || lastBusy[name] == nil { lastBusy[name] = now }
                     let idle = now.timeIntervalSince(lastActivity[name] ?? now)
                     if isAgent ? idle < Double(config.activityGraceMin) * 60 : true {
                         why.append(isAgent ? "agent:\(name)" : "task:\(name)")
                         procActive[name] = true
                     }
-                    if idle > Double(config.stuckMin) * 60, !stuckNotified.contains(name), session != nil {
+                    let silent = now.timeIntervalSince(lastBusy[name] ?? now)
+                    if silent > Double(config.stuckMin) * 60, !stuckNotified.contains(name), session != nil {
                         stuckNotified.insert(name)
                         session?.stuck.append(name)
                         Notifier.say("Wakeful: \(name) looks stuck", "\(name) is alive but has done nothing for \(config.stuckMin) minutes.", priority: 4, tags: "warning")
@@ -141,11 +153,14 @@ final class Engine {
                     if busy { stuckNotified.remove(name) }
                 }
                 if present[name] == true && !exists && !isAgent { finishedTask(name) }
+                if !exists {   // a later run of the same tool starts with a clean slate
+                    lastActivity[name] = nil; lastBusy[name] = nil; stuckNotified.remove(name)
+                }
                 present[name] = exists
             }
         }
 
-        if config.keepWhileRemote, acOK || manualOn, let r = remoteSessionActive(procs) { why.append("remote:\(r)") }
+        if config.keepWhileRemote, acOK || manualOn, let r = remote { why.append("remote:\(r)") }
 
         reasons = why
         externalAwake = isAwake && session == nil && !restorePending
@@ -159,7 +174,7 @@ final class Engine {
                 trip = "battery budget of \(config.batteryBudget)% used"
             }
             else if thermal >= config.thermalLimit || (tempC ?? 0) >= config.tempLimitC { trip = "too hot (\(tempC.map { "\(Int($0))°C" } ?? "thermal pressure"))" }
-            else if config.backpackMode, lid, !power.onAC, thermal >= 1 || (tempC ?? 0) >= config.tempWarnC, remoteSessionActive(procs) == nil {
+            else if config.backpackMode, lid, !power.onAC, thermal >= 1 || (tempC ?? 0) >= config.tempWarnC, remote == nil {
                 trip = "backpack mode: lid closed, on battery and warming up"
             }
         }
@@ -193,6 +208,7 @@ final class Engine {
         // ---- switch on / off ----
         let blocked = (blockedUntil ?? .distantPast) > now
         let want = !why.isEmpty && !blocked && trip == nil
+        if !want && !restorePending { sleepFailNotified = false }   // the episode is over: a new one may warn again
         let nowAwake = awake
         if want && !nowAwake && !externalAwake {
             if setSleepDisabled(true) { beginSession(reasons: why) }
@@ -238,7 +254,8 @@ final class Engine {
         func mins(_ s: String) -> Int? { let p = s.split(separator: ":").compactMap { Int($0) }; return p.count == 2 ? p[0] * 60 + p[1] : nil }
         for r in config.schedules {
             guard let a = mins(r.start), let b = mins(r.end) else { continue }
-            if a <= b { if r.days.contains(wd) && minutes >= a && minutes < b { return true } }
+            if a == b { if r.days.contains(wd) { return true } }   // start == end: the whole day
+            else if a < b { if r.days.contains(wd) && minutes >= a && minutes < b { return true } }
             else {   // crosses midnight: the rule's day is the day it starts
                 let prev = wd == 1 ? 7 : wd - 1
                 if (r.days.contains(wd) && minutes >= a) || (r.days.contains(prev) && minutes < b) { return true }
@@ -308,7 +325,11 @@ final class Engine {
     func setSleepDisabled(_ value: Bool) -> Bool {
         if dryRun { fakeAwake = value; return true }
         let r = sh("/usr/bin/sudo", ["-n", "/usr/bin/pmset", "-a", "disablesleep", value ? "1" : "0"])
-        if r.status != 0 { Notifier.local("Wakeful can't change sleep settings", "Run install.sh again (sudoers rule missing).") }
+        if r.status == 0 { sleepFailNotified = false }
+        else if !sleepFailNotified {   // a missing sudoers rule fails on every tick: say it once
+            sleepFailNotified = true
+            Notifier.local("Wakeful can't change sleep settings", "The sudoers rule is missing. Open Health check… in the Wakeful menu for the fix.")
+        }
         restorePending = !value && r.status != 0
         return r.status == 0
     }

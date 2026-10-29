@@ -13,7 +13,7 @@ struct Stats: Codable {
     func save() { if let d = try? JSONEncoder().encode(self) { try? d.write(to: Paths.stats) } }
 
     var streak: Int {
-        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        let f = posixFormatter("yyyy-MM-dd")
         let set = Set(nights)
         var day = Date(), n = 0
         if !set.contains(f.string(from: day)) { day = Calendar.current.date(byAdding: .day, value: -1, to: day)! }
@@ -40,7 +40,7 @@ enum Report {
         var st = Stats.load()
         st.totalSeconds += dur; st.sessions += 1; st.finishedTasks += s.finished.count
         if dur >= 7200, overlapsNight(s.start, end) {
-            let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+            let f = posixFormatter("yyyy-MM-dd")
             let key = f.string(from: end)
             if !st.nights.contains(key) { st.nights.append(key) }
         }
@@ -62,7 +62,7 @@ enum Report {
         if !s.trips.isEmpty { md += "\n## Safety stops\n" + s.trips.map { "- \($0)\n" }.joined() }
         md += "\nNight score: **\(sc)/100** · streak: \(st.streak) night(s) · ended because: \(reason)\n"
 
-        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd_HHmm"
+        let f = posixFormatter("yyyy-MM-dd_HHmm")
         let base = Paths.reports.appendingPathComponent("night-\(f.string(from: s.start))")
         try? md.write(to: base.appendingPathExtension("md"), atomically: true, encoding: .utf8)
 
