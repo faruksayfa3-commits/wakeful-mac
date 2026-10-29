@@ -129,9 +129,16 @@ func listProcesses() -> [Proc] {
     return res
 }
 
+/// A process is `name` when its executable is called that (`claude`, `rsync`), or when it is a real executable a native
+/// installer keeps in a folder of that name: `~/.local/share/claude/versions/2.1.3`, `…/codex/…/codex-aarch64-apple-darwin`.
+/// Helpers that merely live under such a folder (`~/Library/Application Support/Claude/…`, `Claude.app/…`) don't count.
 func matches(_ p: Proc, _ name: String) -> Bool {
-    let n = name.lowercased()
-    return p.name.lowercased() == n || p.path.lowercased().contains("/\(n)/")
+    let n = name.lowercased(), base = p.name.lowercased(), path = p.path.lowercased()
+    if base == n { return true }
+    guard path.hasPrefix("/"), path.contains("/\(n)/"),
+          !path.contains("/library/application support/"), !path.contains(".app/") else { return false }
+    let versioned = base.first?.isNumber == true && base.allSatisfy { $0.isNumber || $0 == "." }
+    return (versioned || base.hasPrefix(n + "-")) && FileManager.default.isExecutableFile(atPath: p.path)
 }
 
 func descendants(of root: Int32, in all: [Proc]) -> [Proc] {

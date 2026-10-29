@@ -42,5 +42,15 @@ jobs:
             [[ " $archs " == *" $a "* ]] || { echo "missing $a slice"; exit 1; }
           done
 
-      - name: Check CLI syntax
-        run: zsh -n bin/wakeful
+      - name: Check script syntax and bundled scripts
+        run: |
+          for f in bin/wakeful Resources/setup-sudoers.sh install.sh build.sh; do zsh -n "$f"; done
+          for f in wakeful setup-sudoers.sh; do test -x "build/Wakeful.app/Contents/Resources/$f" || { echo "$f not bundled"; exit 1; }; done
+
+      # read-only checks; on the runner some may fail (status 1), but the binary must not crash on this arch
+      - name: wakeful doctor runs
+        run: |
+          set +e
+          WAKEFUL_APP=build/Wakeful.app zsh bin/wakeful doctor
+          s=$?
+          [[ $s -le 1 ]] || { echo "doctor exited with $s"; exit 1; }

@@ -6,6 +6,7 @@
 #   wakeful off                   let the Mac sleep
 #   wakeful status [--json]
 #   wakeful report                open the last night report / card
+#   wakeful doctor                check the sudoers rule, phone, login item… and print fixes
 STATE="$HOME/Library/Application Support/Wakeful/state.json"
 enc() { /usr/bin/python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$1"; }
 send() { open -g "wakeful://$1"; }
@@ -15,6 +16,16 @@ case "$1" in
   watch)  send "watch?name=$(enc "$2")" ;;
   off)    send "off" ;;
   report) send "report" ;;
+  doctor)
+    # the checks live in the app binary; this script may also be the copy inside Wakeful.app (Homebrew links it)
+    APP="$WAKEFUL_APP"
+    if [[ -z "$APP" ]]; then
+      for a in "${0:A:h:h:h}" /Applications/Wakeful.app ~/Applications/Wakeful.app; do
+        [[ -x "$a/Contents/MacOS/Wakeful" ]] && { APP="$a"; break }
+      done
+    fi
+    [[ -x "$APP/Contents/MacOS/Wakeful" ]] || { echo "Wakeful.app not found (set WAKEFUL_APP=/path/to/Wakeful.app)"; exit 1 }
+    exec "$APP/Contents/MacOS/Wakeful" --doctor ;;
   status|"")
     [[ -f "$STATE" ]] || { echo "Wakeful is not running"; exit 1 }
     if [[ "$2" == "--json" ]]; then cat "$STATE"; else

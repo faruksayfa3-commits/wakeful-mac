@@ -9,15 +9,8 @@ pkill -x Wakeful 2>/dev/null || true
 rm -rf /Applications/Wakeful.app && cp -R build/Wakeful.app /Applications/
 mkdir -p ~/.local/bin && cp bin/wakeful ~/.local/bin/wakeful && chmod +x ~/.local/bin/wakeful
 
-RULE="$USER ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a lowpowermode 0, /usr/bin/pmset -a lowpowermode 1"
-TMP=$(mktemp)
-echo "$RULE" > $TMP
-if sudo visudo -cf $TMP >/dev/null; then
-  sudo install -m 0440 -o root -g wheel $TMP /etc/sudoers.d/wakeful
-else
-  echo "sudoers check failed — not installing the rule"; rm $TMP; exit 1
-fi
-rm $TMP
+# the rule itself lives in Resources/setup-sudoers.sh (also shipped inside the app for zip / Homebrew installs)
+./Resources/setup-sudoers.sh
 
 PLIST=~/Library/LaunchAgents/app.wakeful.mac.plist
 cat > $PLIST <<PL

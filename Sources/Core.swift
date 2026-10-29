@@ -22,6 +22,7 @@ enum Paths {
 }
 
 let dryRun = ProcessInfo.processInfo.environment["WAKEFUL_DRYRUN"] == "1"
+let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
 
 // MARK: - shell
 
@@ -152,6 +153,18 @@ enum Notifier {
 }
 
 // MARK: - helpers
+
+/// Fixed formats for file names and stats keys: en_US_POSIX, so a Buddhist or Japanese calendar
+/// (or a user-forced 12-hour clock) can't turn "yyyy-MM-dd" into something else.
+func posixFormatter(_ format: String) -> DateFormatter {
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.dateFormat = format
+    return f
+}
+
+/// Single-quotes a path for a command the user pastes into Terminal.
+func shQuote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
 
 func fmtDuration(_ s: TimeInterval) -> String {
     let m = Int(s / 60)
