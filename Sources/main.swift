@@ -99,6 +99,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         engine.start()
         phone.handler = { [weak self] cmd in self?.phoneCommand(cmd) }
         phone.start()
+        if let name = ProcessInfo.processInfo.environment["WAKEFUL_DEBUG_MENU"] {   // screenshot mode: pops a menu at a fixed spot
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in self?.debugShow(name) }
+        }
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
         installEditMenu()
         // first launch (1.0 users see it once too): what works, the phone topic, and the fix for anything missing
@@ -139,6 +142,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func didWake() { engine.tick() }
+
+    private func debugShow(_ name: String) {
+        if ProcessInfo.processInfo.environment["WAKEFUL_DEBUG_AWAKE"] != nil { engine.startManual(duration: 2 * 3600) }
+        menuNeedsUpdate(menu)
+        if name == "watch" { askWatch(); return }
+        var target = menu
+        if name != "main" {
+            guard let sub = menu.items.first(where: { $0.title.lowercased().contains(name) })?.submenu else { return }
+            target = sub
+        }
+        target.popUp(positioning: nil, at: NSPoint(x: 300, y: 900), in: nil)
+    }
 
     func applicationWillTerminate(_ notification: Notification) { engine.shutdown() }
 
