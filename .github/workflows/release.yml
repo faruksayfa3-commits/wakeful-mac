@@ -1,0 +1,57 @@
+name: Release
+
+# Push a tag such as v1.1.0 → universal Wakeful.app, zipped, with its sha256, on a GitHub Release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14   # builds both slices; CI already runs the x86_64 host
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag matches Info.plist
+        run: |
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)
+          [[ "v$version" == "$GITHUB_REF_NAME" ]] || { echo "Info.plist says $version but the tag is $GITHUB_REF_NAME"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build universal app
+        run: ./build.sh
+
+      - name: Check both slices
+        run: |
+          archs=$(lipo -archs build/Wakeful.app/Contents/MacOS/Wakeful)
+          for a in x86_64 arm64; do
+            [[ " $archs " == *" $a "* ]] || { echo "missing $a slice"; exit 1; }
+          done
+
+      - name: Zip, checksum, filled-in cask
+        working-directory: build
+        run: |
+          zip="Wakeful-$VERSION.zip"
+          ditto -c -k --keepParent Wakeful.app "$zip"
+          shasum -a 256 "$zip" | tee "$zip.sha256"
+          sha=$(cut -d' ' -f1 "$zip.sha256")
+          sed -e "s/^  version \".*\"/  version \"$VERSION\"/" -e "s/^  sha256 \".*\"/  sha256 \"$sha\"/" \
+            ../packaging/homebrew/wakeful.rb > wakeful.rb
+
+      - name: Release notes from CHANGELOG.md
+        run: |
+          awk -v v="$VERSION" 'index($0, "## [" v "]") == 1 { on = 1; next } on && /^## \[/ { exit } on' CHANGELOG.md > build/notes.md
+          [[ -s build/notes.md ]] || echo "See CHANGELOG.md." > build/notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files=("build/Wakeful-$VERSION.zip" "build/Wakeful-$VERSION.zip.sha256" build/wakeful.rb)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then   # re-run: replace the assets
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" --title "Wakeful $VERSION" --notes-file build/notes.md
+          fi
